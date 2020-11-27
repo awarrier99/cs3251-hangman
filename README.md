@@ -17,7 +17,7 @@ For help running either the `server.py` or `client.py` files, you can specify th
 
 Server
 ```
-% python server.py -h                                                                                                                                               
+% python server.py -h
 usage: server.py [-h] port [dictionary]
 
 Start the Hangman server
