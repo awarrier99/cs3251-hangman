@@ -6,9 +6,11 @@ This project was developed using Python 3.8.2 on macOS 11 (Big Sur). If possible
 This project does not require any non-builtin Python libraries
 
 ## Overview
-This project uses the Python [sockets](https://docs.python.org/3/library/socket.html) library to implement server-client functionality. The server and the client communicate using a standard binary message format; for this project I built classes to serve as wrappers (`ServerMessage` and `ClientMessage` in [message.py](message.py)) around these messages, with convenience methods to convert to and from the standard message format
+This project uses the Python [socket](https://docs.python.org/3/library/socket.html) library to implement server-client functionality with native TCP sockets. The server and the client communicate using a standard binary message format; for this project I built classes to serve as wrappers (`ServerMessage` and `ClientMessage` in [message.py](message.py)) around these messages, with convenience methods to convert to and from the standard message format
 
 Additionally, the server and client frequently exchange game data, such as the number of incorrect guesses as well as the letters which have been revealed so far. I defined a class (`GameData` in [game.py](game.py)) as a wrapper around this data, with convenience methods to convert to and from `ServerMessage`s
+
+The server supports multiple concurrent connections, through the use of the Python [threading](https://docs.python.org/3/library/threading.html) library. As the main thread accepts a connection from a new client socket, it spins up a new thread to create a game with that client while continuing to listen for more clients. These threads and the associated client sockets are stored in a dictionary for graceful shutdown upon various conditions, such as a keyboard interrupt. If the number of concurrent connections reaches 3, then no new connections are allowed until one of the connected clients drops.
 
 ## Running the code
 For help running either the `server.py` or `client.py` files, you can specify the option `-h` or `--help` for more information. Respectively, that command displays the following information:
@@ -43,3 +45,5 @@ positional arguments:
 optional arguments:
   -h, --help  show this help message and exit
 ```
+
+## Test Cases
