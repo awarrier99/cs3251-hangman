@@ -46,20 +46,25 @@ optional arguments:
   -h, --help  show this help message and exit
 ```
 
-## Test Cases
+## Starting a game
+The first prompt will ask whether you want to play in multiplayer mode or not. Respond `y` for yes and `n` for single-player mode. If in single-player mode, continue as normal.
+
+## Test cases
 The dictionary of words used is included in this repository as [words.txt](words.txt)
 
-The server was run with the following command: `python server.py 3000 words.txt`
+The server (in every scenario) was run with the following command: `python server.py 3000 words.txt`
+The client (in every scenario) was run with the following command: `python client.py 127.0.0.1 3000`
 
+### Single-player mode
 Server output (for both the win and loss scenarios)
 ```
 Accepted connection from 127.0.0.1:64521
+Client 127.0.0.1:64521 playing in single-player mode
 Terminated connection from 127.0.0.1:64521
 Accepted connection from 127.0.0.1:64531
+Client 127.0.0.1:64531 playing in single-player mode
 Terminated connection from 127.0.0.1:64531
 ```
-
-The client was run (for both the win and loss scenarios) with the following command: `python client.py 127.0.0.1 3000`
 
 Client win output
 ```
@@ -154,4 +159,151 @@ Incorrect Guesses: a i o d s
 Letter to guess:
 l
 You Lose: prey
+```
+
+### Multiplayer mode
+
+Server output (for both the win and loss scenarios)
+```
+Accepted connection from 127.0.0.1:65423
+Client 127.0.0.1:65423 playing in multiplayer mode
+Accepted connection from 127.0.0.1:65424
+Client 127.0.0.1:65424 playing in multiplayer mode
+Terminated connection from 127.0.0.1:65423
+Terminated connection from 127.0.0.1:65424
+Accepted connection from 127.0.0.1:65426
+Client 127.0.0.1:65426 playing in multiplayer mode
+Accepted connection from 127.0.0.1:65428
+Client 127.0.0.1:65428 playing in multiplayer mode
+Terminated connection from 127.0.0.1:65428
+Terminated connection from 127.0.0.1:65426
+^CShutting down server
+Terminated connection from 127.0.0.1:65426
+Terminated connection from 127.0.0.1:65428
+```
+
+Client 1 win output
+```
+Two Player? (y/n): y
+Waiting for other player!
+Game Starting!
+Waiting on Player 1...
+Your Turn!
+_ _ _ _
+Incorrect Guesses:
+
+Letter to guess:
+a
+Waiting on Player 2...
+Your Turn!
+_ _ _ e
+Incorrect Guesses: a
+
+Letter to guess:
+s
+Waiting on Player 2...
+Your Turn!
+m _ _ e
+Incorrect Guesses: a s
+
+Letter to guess:
+i
+Waiting on Player 2...
+You Win! The word was mine
+```
+
+Client 2 win output
+```
+Two Player? (y/n): y
+Game Starting!
+Waiting on Player 1...
+Your Turn!
+_ _ _ _
+Incorrect Guesses: a
+
+Letter to guess:
+e
+Waiting on Player 1...
+Your Turn!
+_ _ _ e
+Incorrect Guesses: a s
+
+Letter to guess:
+m
+Waiting on Player 1...
+Your Turn!
+m i _ e
+Incorrect Guesses: a s
+
+Letter to guess:
+i
+Error! Letter i has been guessed before, please guess another letter.
+
+Letter to guess:
+n
+You Win!
+```
+
+Client 1 loss output
+```
+Two Player? (y/n): y
+Waiting for other player!
+Game Starting!
+Your Turn!
+_ _ _ _
+Incorrect Guesses:
+
+Letter to guess:
+a
+Waiting on Player 2...
+Your Turn!
+_ _ _ a
+Incorrect Guesses: q
+
+Letter to guess:
+w
+Waiting on Player 2...
+Your Turn!
+_ _ _ a
+Incorrect Guesses: q w z
+
+Letter to guess:
+x
+Waiting on Player 2...
+Your Turn!
+_ _ _ a
+Incorrect Guesses: q w z x l
+
+Letter to guess:
+y
+You Lose: coma
+```
+
+Client 2 loss output
+```
+Two Player? (y/n): y
+Game Starting!
+Waiting on Player 1...
+Your Turn!
+_ _ _ a
+Incorrect Guesses:
+
+Letter to guess:
+q
+Waiting on Player 1...
+Your Turn!
+_ _ _ a
+Incorrect Guesses: q w
+
+Letter to guess:
+z
+Waiting on Player 1...
+Your Turn!
+_ _ _ a
+Incorrect Guesses: q w z x
+
+Letter to guess:
+l
+Waiting on Player 1...
+You Lose: coma
 ```

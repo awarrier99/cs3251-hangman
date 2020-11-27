@@ -12,7 +12,6 @@ def connect_server(ip, port) -> bytes:
     global sock
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((ip, port))
-    print(sock.getsockname())
     return sock.recv(1024)
 
 
@@ -20,10 +19,6 @@ def cleanup():
     data = 'Terminate'
     message = ClientMessage(len(data), data)
     sock.sendall(message.to_raw_bytes())
-    try:
-        sock.recv(1024)
-    except ConnectionResetError:
-        pass
 
 
 def display_prompt(game_data: GameData):
@@ -98,7 +93,7 @@ def create_1p_game():
             guess_letter(game_data)
         else:
             print(response.data)
-            cleanup()
+            return cleanup()
 
 
 def create_2p_game():
@@ -109,8 +104,22 @@ def create_2p_game():
 
     response = ServerMessage.from_raw_bytes(data)
     print(response.data)
+
     while True:
-        pass
+        data = sock.recv(1024)
+        if data == b'':
+            print('Terminated by server')
+            break
+
+        response = ServerMessage.from_raw_bytes(data)
+        if response.msg_flag == 0:
+            game_data = GameData.from_message(response)
+            display_prompt(game_data)
+            guess_letter(game_data)
+        else:
+            print(response.data)
+            if 'You Win' in response.data or 'You Lose' in response.data:
+                return cleanup()
 
 
 def create_game(data: bytes):
@@ -130,7 +139,6 @@ def create_game(data: bytes):
         create_1p_game()
     else:
         print('Invalid option. Exiting')
-
 
 
 if __name__ == '__main__':

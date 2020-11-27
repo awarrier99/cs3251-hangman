@@ -2,6 +2,7 @@ import argparse
 import socket
 import threading
 import random
+import time
 
 from message import ClientMessage, ServerMessage
 from game import GameData
@@ -14,10 +15,14 @@ word_len = 5
 sock: socket.socket
 
 connections = {}
-connections_lock = threading.Lock()
 
+mp_game_data = None
+mp_word = None
 multiplayer_queue = {}
-queue_lock = threading.Lock()
+priority = {}
+turn = 1
+mp_game_over = False
+mp_message = None
 
 
 class GameThread(threading.Thread):
@@ -33,7 +38,42 @@ class GameThread(threading.Thread):
         except OSError:
             pass
 
+    def check_guess(self, game_data: GameData, response: ClientMessage):
+        new_game_data = game_data.copy()
+        guess = response.data
+        match = False
+
+        for idx, c in enumerate(self.word):
+            if c == guess:
+                match = True
+                new_game_data.word = new_game_data.word[:idx] + guess + new_game_data.word[idx + 1:]
+
+                if new_game_data.word == self.word:
+                    data = 'You Win!'
+                    message = ServerMessage(len(data), data)
+                    self.stop()
+                    self.sock.sendall(message.to_raw_bytes())
+                    return new_game_data
+
+        if not match:
+            new_game_data.num_incorrect += 1
+            new_game_data.incorrect.append(guess)
+
+            if new_game_data.num_incorrect == 6:
+                data = f'You Lose: {self.word}'
+                message = ServerMessage(len(data), data)
+                self.stop()
+                self.sock.sendall(message.to_raw_bytes())
+                return new_game_data
+
+        self.sock.sendall(new_game_data.to_message().to_raw_bytes())
+
+        return new_game_data
+
     def start_1p_game(self):
+        conn = connections[self]
+        print(f'Client {conn.addr[0]}:{conn.addr[1]} playing in single-player mode')
+
         data = 'Ready to start game? (y/n): '
         message = ServerMessage(len(data), data)
         self.sock.sendall(message.to_raw_bytes())
@@ -66,27 +106,139 @@ class GameThread(threading.Thread):
 
             game_data = self.check_guess(game_data, response)
 
-    def start_2p_game(self):
-        with queue_lock:
+    def check_guess_2p(self, game_data: GameData, response: ClientMessage):
+        global mp_game_over, mp_message
+
+        new_game_data = game_data.copy()
+        guess = response.data
+        match = False
+
+        for idx, c in enumerate(self.word):
+            if c == guess:
+                match = True
+                new_game_data.word = new_game_data.word[:idx] + guess + new_game_data.word[idx + 1:]
+
+                if new_game_data.word == self.word:
+                    data = f'You Win!'
+                    message = ServerMessage(len(data), data)
+                    data = f'You Win! The word was {self.word}'
+                    mp_message = ServerMessage(len(data), data)
+                    mp_game_over = True
+                    time.sleep(0.5)  # let flag change before being read by other thread
+                    self.stop()
+                    self.sock.sendall(message.to_raw_bytes())
+                    return new_game_data
+
+        if not match:
+            new_game_data.num_incorrect += 1
+            new_game_data.incorrect.append(guess)
+
+            if new_game_data.num_incorrect == 6:
+                data = f'You Lose: {self.word}'
+                mp_message = ServerMessage(len(data), data)
+                mp_game_over = True
+                time.sleep(0.5)  # let flag change before being read by other thread
+                self.stop()
+                self.sock.sendall(mp_message.to_raw_bytes())
+                return new_game_data
+
+        return new_game_data
+
+    def play_2p_game(self):
+        global mp_game_data, turn
+
+        count = 0
+        while not self._signal_stop:
+            if mp_game_over:
+                self.sock.sendall(mp_message.to_raw_bytes())
+                return
+
+            if not self.word:
+                self.word = mp_word
+
             if len(multiplayer_queue) == 0:
-                with connections_lock:
-                    multiplayer_queue[self] = connections[self]
+                continue
 
-                data = 'Waiting for other player!'
+            is_player_turn = priority[self] == turn
+
+            if is_player_turn and self.word:
+                count = 0
+                data = 'Your Turn!'
                 message = ServerMessage(len(data), data)
                 self.sock.sendall(message.to_raw_bytes())
+                time.sleep(0.5)  # prevent weird error where second message wouldn't send
+                self.sock.sendall(mp_game_data.to_message().to_raw_bytes())
+
+                data = self.sock.recv(1024)
+                if data == b'':
+                    return
+
+                response = ClientMessage.from_raw_bytes(data)
+                if response.data == 'Terminate':
+                    return self.cleanup()
+
+                mp_game_data = self.check_guess_2p(mp_game_data, response)
+                if turn == 1:
+                    turn = 2
+                else:
+                    turn = 1
             else:
-                data = 'Game Starting!'
-                message = ServerMessage(len(data), data)
-                self.sock.sendall(message.to_raw_bytes())
+                if count < 1:
+                    data = f'Waiting on Player {turn}...'
+                    message = ServerMessage(len(data), data)
+                    self.sock.sendall(message.to_raw_bytes())
+                    count += 1
 
-                multiplayer_queue[0].sock.sendall(message.to_raw_bytes())
+    def start_2p_game(self):
+        global mp_game_data, mp_word
 
-                with connections_lock:
-                    multiplayer_queue[self] = connections[self]
+        if len(connections) == 3:
+            conn = connections[self]
+            print(f'Client {conn.addr[0]}:{conn.addr[1]} multiplayer mode request rejected due to limited connections')
+
+            data = 'There are not enough connections available to set up a multiplayer game. Please try again later or play a single-player game'
+            message = ServerMessage(len(data), data)
+            self.sock.sendall(message.to_raw_bytes())
+            return self.cleanup()
+        if len(multiplayer_queue) == 0:
+            conn = connections[self]
+            multiplayer_queue[self] = conn
+            priority[self] = 1
+            print(f'Client {conn.addr[0]}:{conn.addr[1]} playing in multiplayer mode')
+
+            data = 'Waiting for other player!'
+            message = ServerMessage(len(data), data)
+            self.sock.sendall(message.to_raw_bytes())
+        elif len(multiplayer_queue) == 1:
+            data = 'Game Starting!'
+            message = ServerMessage(len(data), data)
+            self.sock.sendall(message.to_raw_bytes())
+
+            key = next(iter(multiplayer_queue))
+            multiplayer_queue[key].sock.sendall(message.to_raw_bytes())
+
+            conn = connections[self]
+            multiplayer_queue[self] = conn
+            priority[self] = 2
+            print(f'Client {conn.addr[0]}:{conn.addr[1]} playing in multiplayer mode')
+
+            [self.word] = random.sample(dictionary, 1)
+            game_word = '_' * len(self.word)
+            mp_game_data = GameData(word_len, 0, game_word, [])
+            mp_word = self.word
+            self.play_2p_game()
+        else:
+            conn = connections[self]
+            print(f'Client {conn.addr[0]}:{conn.addr[1]} multiplayer mode request rejected due to existing game')
+
+            data = 'A multiplayer game is already being played on this server. Please try again later or play a single-player game'
+            message = ServerMessage(len(data), data)
+            self.sock.sendall(message.to_raw_bytes())
+            return self.cleanup()
 
         while not self._signal_stop:
-            pass
+            if len(multiplayer_queue) == 2:
+                return self.play_2p_game()
 
     def start_game(self):
         data = 'Two Player? (y/n): '
@@ -103,45 +255,32 @@ class GameThread(threading.Thread):
         else:
             self.start_1p_game()
 
-    def check_guess(self, game_data: GameData, response: ClientMessage):
-        new_game_data = game_data.copy()
-        guess = response.data
-        match = False
+        data = self.sock.recv(1024)
+        if data == b'':
+            return
 
-        for idx, c in enumerate(self.word):
-            if c == guess:
-                match = True
-                new_game_data.word = new_game_data.word[:idx] + guess + new_game_data.word[idx + 1:]
-
-                if new_game_data.word == self.word:
-                    data = 'You Win!'
-                    message = ServerMessage(len(data), data)
-                    self.sock.sendall(message.to_raw_bytes())
-                    return new_game_data
-
-        if not match:
-            new_game_data.num_incorrect += 1
-            new_game_data.incorrect.append(guess)
-
-            if new_game_data.num_incorrect == 6:
-                data = f'You Lose: {self.word}'
-                message = ServerMessage(len(data), data)
-                self.sock.sendall(message.to_raw_bytes())
-                return new_game_data
-
-        self.sock.sendall(new_game_data.to_message().to_raw_bytes())
-
-        return new_game_data
+        response = ClientMessage.from_raw_bytes(data)
+        if response.data == 'Terminate':
+            return self.cleanup()
 
     def cleanup(self):
+        global mp_game_data, mp_word, multiplayer_queue, priority, turn, mp_game_over, mp_message
+
         self.sock.close()
-        with connections_lock:
-            conn = connections[self]
-            with queue_lock:
-                if self in multiplayer_queue:
-                    del multiplayer_queue[self]
-            print(f'Terminated connection from {conn.addr[0]}:{conn.addr[1]}')
-            conn.signal_close = True
+        conn = connections[self]
+        if self in multiplayer_queue:
+            del multiplayer_queue[self]
+            del priority[self]
+
+        if len(multiplayer_queue) == 0:
+            mp_game_data = None
+            mp_word = None
+            turn = 1
+            mp_game_over = False
+            mp_message = None
+
+        print(f'Terminated connection from {conn.addr[0]}:{conn.addr[1]}')
+        conn.signal_close = True
 
     def stop(self):
         self._signal_stop = True
@@ -170,14 +309,13 @@ def start_server(port):
         print(f'Accepted connection from {addr[0]}:{addr[1]}')
 
         deletes = []
-        with connections_lock:
-            for thread, conn in connections.items():
-                if conn.signal_close:
-                    conn.close()
-                    deletes.append(thread)
+        for thread, conn in connections.items():
+            if conn.signal_close:
+                conn.close()
+                deletes.append(thread)
 
-            for t in deletes:
-                del connections[t]
+        for t in deletes:
+            del connections[t]
 
         if len(connections) == 3:
             data = 'Server overloaded'
@@ -190,8 +328,7 @@ def start_server(port):
         thread = GameThread(csock)
         conn = Connection(thread, csock, addr)
         thread.start()
-        with connections_lock:
-            connections[thread] = conn
+        connections[thread] = conn
 
 
 def cleanup():
@@ -222,7 +359,6 @@ if __name__ == '__main__':
     if args.dictionary:
         initialize_dictionary(args.dictionary)
 
-    print(dictionary)
     try:
         start_server(args.port)
     except KeyboardInterrupt:
