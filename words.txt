@@ -1,0 +1,11 @@
+4 10
+slot
+film
+prey
+coma
+inch
+mine
+safe
+myth
+sink
+fear
