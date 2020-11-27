@@ -12,7 +12,12 @@ dictionary = ['cause', 'shoot', 'swing', 'rider', 'bring', 'shock', 'minor', 'de
 word_len = 5
 
 sock: socket.socket
+
 connections = {}
+connections_lock = threading.Lock()
+
+multiplayer_queue = {}
+queue_lock = threading.Lock()
 
 
 class GameThread(threading.Thread):
@@ -28,7 +33,7 @@ class GameThread(threading.Thread):
         except OSError:
             pass
 
-    def start_game(self):
+    def start_1p_game(self):
         data = 'Ready to start game? (y/n): '
         message = ServerMessage(len(data), data)
         self.sock.sendall(message.to_raw_bytes())
@@ -60,6 +65,43 @@ class GameThread(threading.Thread):
                 return self.cleanup()
 
             game_data = self.check_guess(game_data, response)
+
+    def start_2p_game(self):
+        with queue_lock:
+            if len(multiplayer_queue) == 0:
+                with connections_lock:
+                    multiplayer_queue[self] = connections[self]
+
+                data = 'Waiting for other player!'
+                message = ServerMessage(len(data), data)
+                self.sock.sendall(message.to_raw_bytes())
+            else:
+                data = 'Game Starting!'
+                message = ServerMessage(len(data), data)
+                self.sock.sendall(message.to_raw_bytes())
+
+                multiplayer_queue[0].sock.sendall(message.to_raw_bytes())
+
+                with connections_lock:
+                    multiplayer_queue[self] = connections[self]
+
+        while not self._signal_stop:
+            pass
+
+    def start_game(self):
+        data = 'Two Player? (y/n): '
+        message = ServerMessage(len(data), data)
+        self.sock.sendall(message.to_raw_bytes())
+
+        data = self.sock.recv(1024)
+        if data == b'':
+            return self.cleanup()
+
+        response = ClientMessage.from_raw_bytes(data)
+        if response.data == 'y':
+            self.start_2p_game()
+        else:
+            self.start_1p_game()
 
     def check_guess(self, game_data: GameData, response: ClientMessage):
         new_game_data = game_data.copy()
@@ -93,9 +135,13 @@ class GameThread(threading.Thread):
 
     def cleanup(self):
         self.sock.close()
-        conn = connections[self]
-        print(f'Terminated connection from {conn.addr[0]}:{conn.addr[1]}')
-        conn.signal_close = True
+        with connections_lock:
+            conn = connections[self]
+            with queue_lock:
+                if self in multiplayer_queue:
+                    del multiplayer_queue[self]
+            print(f'Terminated connection from {conn.addr[0]}:{conn.addr[1]}')
+            conn.signal_close = True
 
     def stop(self):
         self._signal_stop = True
@@ -124,13 +170,14 @@ def start_server(port):
         print(f'Accepted connection from {addr[0]}:{addr[1]}')
 
         deletes = []
-        for thread, conn in connections.items():
-            if conn.signal_close:
-                conn.close()
-                deletes.append(thread)
+        with connections_lock:
+            for thread, conn in connections.items():
+                if conn.signal_close:
+                    conn.close()
+                    deletes.append(thread)
 
-        for t in deletes:
-            del connections[t]
+            for t in deletes:
+                del connections[t]
 
         if len(connections) == 3:
             data = 'Server overloaded'
@@ -143,7 +190,8 @@ def start_server(port):
         thread = GameThread(csock)
         conn = Connection(thread, csock, addr)
         thread.start()
-        connections[thread] = conn
+        with connections_lock:
+            connections[thread] = conn
 
 
 def cleanup():

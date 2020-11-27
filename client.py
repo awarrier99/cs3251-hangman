@@ -64,11 +64,13 @@ def guess_letter(game_data: GameData):
     sock.sendall(message.to_raw_bytes())
 
 
-def create_game(data: bytes):
-    response = ServerMessage.from_raw_bytes(data)
-    if response.data == 'Server overloaded':
-        print(response.data)
+def create_1p_game():
+    data = sock.recv(1024)
+    if data == b'':
+        print('Terminated by server')
         return
+
+    response = ServerMessage.from_raw_bytes(data)
 
     option = input(response.data)
     if option == 'y':
@@ -97,6 +99,37 @@ def create_game(data: bytes):
         else:
             print(response.data)
             cleanup()
+
+
+def create_2p_game():
+    data = sock.recv(1024)
+    if data == b'':
+        print('Terminated by server')
+        return
+
+    response = ServerMessage.from_raw_bytes(data)
+    print(response.data)
+    while True:
+        pass
+
+
+def create_game(data: bytes):
+    response = ServerMessage.from_raw_bytes(data)
+    if response.data == 'Server overloaded':
+        print(response.data)
+        return
+
+    option = input(response.data)
+    if option == 'y':
+        message = ClientMessage(1, 'y')
+        sock.sendall(message.to_raw_bytes())
+        create_2p_game()
+    elif option == 'n':
+        message = ClientMessage(1, 'n')
+        sock.sendall(message.to_raw_bytes())
+        create_1p_game()
+    else:
+        print('Invalid option. Exiting')
 
 
 
